@@ -1,5 +1,9 @@
 {
+<<<<<<< HEAD
   "name": "smv-insight",
+=======
+  "name": "gsd-studio",
+>>>>>>> ed4923deff914a348861dc80e6fee1c7b16860f8
   "private": true,
   "version": "1.0.0",
   "type": "module",
