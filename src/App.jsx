@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect, useRef } from 'react';
 import './app.css';
 import { APP_HTML } from './appHtml.js';
@@ -18,10 +17,18 @@ export default function App() {
     script.text = APP_SCRIPT;
     document.body.appendChild(script);
 
-    return () => {
+   return () => {
       // No teardown: the app manages its own DOM/state after mount.
-=======
-import { useEffect, useRef } from "react";
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      dangerouslySetInnerHTML={{ __html: APP_HTML }}
+    />
+  );
+}
 
 /*
   GSD Studio — SMV Cost Engineering
