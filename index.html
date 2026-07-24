@@ -1089,7 +1089,7 @@
           </div>
           <div id="nu_error" class="hidden" style="color:#b3261e;font-size:12px;margin-top:10px;font-weight:700;"></div>
           <div style="display:flex;gap:8px;margin-top:16px;">
-            <button class="tape" id="nu_create" style="flex:1;">+ Create User</button>
+            <button class="tape" id="nu_create" style="flex:1;" onclick="handleCreateOrUpdateUser()">+ Create User</button>
             <button class="secondary hidden" id="nu_cancelEdit">Cancel</button>
           </div>
         </div>
@@ -3505,25 +3505,89 @@ $('pw_save').addEventListener('click', debounceClick(async ()=>{
 
 /* ---- Manage Users modal ---- */
 let editingUserId=null;
-function resetUserForm(){
-  editingUserId=null;
-  $('nu_username').value=''; $('nu_password').value=''; $('nu_isAdmin').checked=false;
-  document.querySelectorAll('.nu-menu').forEach(cb=>cb.checked=false);
-  $('nu_error').classList.add('hidden');
-  $('nu_panelTitle').textContent='+ Create New User';
-  $('nu_create').textContent='+ Create User';
-  $('nu_cancelEdit').classList.add('hidden');
+function resetUserForm() {
+    editingUserId = null;
+    $('nu_username').value = ''; 
+    $('nu_password').value = ''; 
+    $('nu_isAdmin').checked = false;
+    document.querySelectorAll('.nu-menu').forEach(cb => cb.checked = false);
+    $('nu_error').classList.add('hidden');
+    $('nu_panelTitle').textContent = '+ Create New User';
+    $('nu_create').textContent = '+ Create User';
+    $('nu_cancelEdit').classList.add('hidden');
 }
-function startEditUser(u){
-  editingUserId=u.id;
-  $('nu_username').value=u.username; $('nu_password').value=u.password; $('nu_isAdmin').checked=!!u.isAdmin;
-  document.querySelectorAll('.nu-menu').forEach(cb=>{ cb.checked = !!(u.menuAccess && u.menuAccess[cb.value]); });
-  $('nu_error').classList.add('hidden');
-  $('nu_panelTitle').textContent='✎ Edit User — '+u.username;
-  $('nu_create').textContent='Save Changes';
-  $('nu_cancelEdit').classList.remove('hidden');
-  $('nu_username').scrollIntoView({behavior:'smooth', block:'center'});
+
+function startEditUser(u) {
+    editingUserId = u.id;
+    $('nu_username').value = u.username; 
+    $('nu_password').value = u.password; 
+    $('nu_isAdmin').checked = !!u.isAdmin;
+    document.querySelectorAll('.nu-menu').forEach(cb => { cb.checked = !!(u.menuAccess && u.menuAccess[cb.value]); });
+    $('nu_error').classList.add('hidden');
+    $('nu_panelTitle').textContent = '✏️ Edit User - ' + u.username;
+    $('nu_create').textContent = 'Save Changes';
+    $('nu_cancelEdit').classList.remove('hidden');
+    $('nu_username').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
+
+// 🔥 FIREBASE-ல் பயனரை உருவாக்க/புதுப்பிக்க (Create/Update User)
+async function handleCreateOrUpdateUser() {
+    const username = $('nu_username').value.trim();
+    const password = $('nu_password').value.trim();
+    const isAdmin = $('nu_isAdmin').checked;
+
+    if (!username || !password) {
+        $('nu_error').textContent = "Username and Password are required!";
+        $('nu_error').classList.remove('hidden');
+        return;
+    }
+
+    const menuAccess = {};
+    document.querySelectorAll('.nu-menu').forEach(cb => {
+        menuAccess[cb.value] = cb.checked;
+    });
+
+    const userData = {
+        username: username,
+        password: password,
+        isAdmin: isAdmin,
+        menuAccess: menuAccess,
+        updatedAt: new Date()
+    };
+
+    try {
+        if (editingUserId) {
+            // Update existing user in Firebase
+            await db.collection('users').doc(editingUserId).update(userData);
+        } else {
+            // Create new user in Firebase
+            await db.collection('users').doc(username).set(userData);
+        }
+
+        resetUserForm();
+        renderUsersList(); // UI-ஐ புதுப்பிக்க
+        alert("User saved successfully in Online Database!");
+    } catch (error) {
+        console.error("Error saving user to Firebase:", error);
+        $('nu_error').textContent = "Firebase Error: " + error.message;
+        $('nu_error').classList.remove('hidden');
+    }
+}
+
+// 🔥 FIREBASE-ல் இருந்து பயனர்களை லோட் செய்ய (Load Users from Firebase)
+function renderUsersList() {
+    db.collection('users').onSnapshot((snapshot) => {
+        let users = [];
+        snapshot.forEach((doc) => {
+            users.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // உங்கள் UI-ல் பயனர்களின் பட்டியலைக் காட்டும் பழைய Logic-ஐ இங்கே அழைத்துக் கொள்ளலாம்
+        if (typeof displayUsersUI === 'function') {
+            displayUsersUI(users);
+        }
+    });
+}}
 function renderUsersList(){
   $('uc_count').textContent = USERS.length;
   $('usersListBody').innerHTML = USERS.map(u=>{
