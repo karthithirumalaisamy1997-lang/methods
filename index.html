@@ -1089,7 +1089,7 @@
           </div>
           <div id="nu_error" class="hidden" style="color:#b3261e;font-size:12px;margin-top:10px;font-weight:700;"></div>
           <div style="display:flex;gap:8px;margin-top:16px;">
-            <button class="tape" id="nu_create" style="flex:1;" onclick="handleCreateOrUpdateUser()">+ Create User</button>
+            <button class="tape" id="nu_create" style="flex:1;">+ Create User</button>
             <button class="secondary hidden" id="nu_cancelEdit">Cancel</button>
           </div>
         </div>
@@ -1473,36 +1473,58 @@ Ln,Type,Code,Title,Freq,SMV
 
 
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
-// Polyfill for the window.storage API (get/set/delete/list) using the
-// browser's localStorage, so the app works as a normal deployed website
-// (Vercel, Netlify, etc.) without depending on the Claude.ai artifact
-// storage sandbox.
-//
-// Data is stored per-browser (localStorage), scoped under a fixed prefix
-// so it doesn't collide with other apps on the same domain.
+// Polyfill for the window.storage API (get/set/delete/list) backed by
+// Firebase Realtime Database, so ALL users / all devices / all browsers
+// share the SAME data (users, operations, records etc.) instead of each
+// browser having its own separate localStorage copy.
 
-const NS = 'smv_insight::';
+const firebaseConfig = {
+  apiKey: "AIzaSyDZNZP_gVBXZs1xDvKKdfVZ7SWfacvM-5A",
+  authDomain: "smv-insight.firebaseapp.com",
+  databaseURL: "https://smv-insight-default-rtdb.firebaseio.com",
+  projectId: "smv-insight",
+  storageBucket: "smv-insight.firebasestorage.app",
+  messagingSenderId: "290153757190",
+  appId: "1:290153757190:web:8ad595d9a20e001135a187",
+  measurementId: "G-F1HM5CJX0H"
+};
 
-function nsKey(key) {
-  return NS + key;
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// Root node under which all app data lives, so this app doesn't collide
+// with anything else that might use the same Firebase project.
+const NS = 'smv_insight_data';
+
+// Realtime Database keys cannot contain '.', '#', '$', '[', ']', '/' or
+// control characters. App-generated keys only use letters/numbers/':' but
+// we sanitize defensively so nothing ever throws.
+function encodeKey(key) {
+  return String(key).replace(/[.#$\[\]\/]/g, c => '~' + c.charCodeAt(0) + '~');
+}
+function decodeKey(key) {
+  return String(key).replace(/~(\d+)~/g, (_, code) => String.fromCharCode(Number(code)));
 }
 
 function install() {
   window.storage = {
     async get(key, _shared = false) {
       try {
-        const raw = localStorage.getItem(nsKey(key));
-        if (raw === null) return null;
-        return { key, value: raw, shared: false };
+        const snap = await db.ref(`${NS}/${encodeKey(key)}`).get();
+        if (!snap.exists()) return null;
+        return { key, value: snap.val(), shared: false };
       } catch (e) {
+        console.error('storage.get failed', e);
         return null;
       }
     },
 
     async set(key, value, _shared = false) {
       try {
-        localStorage.setItem(nsKey(key), value);
+        await db.ref(`${NS}/${encodeKey(key)}`).set(value);
         return { key, value, shared: false };
       } catch (e) {
         console.error('storage.set failed', e);
@@ -1512,25 +1534,29 @@ function install() {
 
     async delete(key, _shared = false) {
       try {
-        localStorage.removeItem(nsKey(key));
+        await db.ref(`${NS}/${encodeKey(key)}`).remove();
         return { key, deleted: true, shared: false };
       } catch (e) {
+        console.error('storage.delete failed', e);
         return null;
       }
     },
 
     async list(prefix = '', _shared = false) {
       try {
+        const encPrefix = encodeKey(prefix);
+        const snap = await db.ref(NS)
+          .orderByKey()
+          .startAt(encPrefix)
+          .endAt(encPrefix + '\uf8ff')
+          .get();
         const keys = [];
-        const full = NS + prefix;
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith(full)) {
-            keys.push(k.slice(NS.length));
-          }
+        if (snap.exists()) {
+          snap.forEach(child => { keys.push(decodeKey(child.key)); });
         }
         return { keys, prefix, shared: false };
       } catch (e) {
+        console.error('storage.list failed', e);
         return null;
       }
     }
@@ -3505,89 +3531,25 @@ $('pw_save').addEventListener('click', debounceClick(async ()=>{
 
 /* ---- Manage Users modal ---- */
 let editingUserId=null;
-function resetUserForm() {
-    editingUserId = null;
-    $('nu_username').value = ''; 
-    $('nu_password').value = ''; 
-    $('nu_isAdmin').checked = false;
-    document.querySelectorAll('.nu-menu').forEach(cb => cb.checked = false);
-    $('nu_error').classList.add('hidden');
-    $('nu_panelTitle').textContent = '+ Create New User';
-    $('nu_create').textContent = '+ Create User';
-    $('nu_cancelEdit').classList.add('hidden');
+function resetUserForm(){
+  editingUserId=null;
+  $('nu_username').value=''; $('nu_password').value=''; $('nu_isAdmin').checked=false;
+  document.querySelectorAll('.nu-menu').forEach(cb=>cb.checked=false);
+  $('nu_error').classList.add('hidden');
+  $('nu_panelTitle').textContent='+ Create New User';
+  $('nu_create').textContent='+ Create User';
+  $('nu_cancelEdit').classList.add('hidden');
 }
-
-function startEditUser(u) {
-    editingUserId = u.id;
-    $('nu_username').value = u.username; 
-    $('nu_password').value = u.password; 
-    $('nu_isAdmin').checked = !!u.isAdmin;
-    document.querySelectorAll('.nu-menu').forEach(cb => { cb.checked = !!(u.menuAccess && u.menuAccess[cb.value]); });
-    $('nu_error').classList.add('hidden');
-    $('nu_panelTitle').textContent = '✏️ Edit User - ' + u.username;
-    $('nu_create').textContent = 'Save Changes';
-    $('nu_cancelEdit').classList.remove('hidden');
-    $('nu_username').scrollIntoView({ behavior: 'smooth', block: 'center' });
+function startEditUser(u){
+  editingUserId=u.id;
+  $('nu_username').value=u.username; $('nu_password').value=u.password; $('nu_isAdmin').checked=!!u.isAdmin;
+  document.querySelectorAll('.nu-menu').forEach(cb=>{ cb.checked = !!(u.menuAccess && u.menuAccess[cb.value]); });
+  $('nu_error').classList.add('hidden');
+  $('nu_panelTitle').textContent='✎ Edit User — '+u.username;
+  $('nu_create').textContent='Save Changes';
+  $('nu_cancelEdit').classList.remove('hidden');
+  $('nu_username').scrollIntoView({behavior:'smooth', block:'center'});
 }
-
-// 🔥 FIREBASE-ல் பயனரை உருவாக்க/புதுப்பிக்க (Create/Update User)
-async function handleCreateOrUpdateUser() {
-    const username = $('nu_username').value.trim();
-    const password = $('nu_password').value.trim();
-    const isAdmin = $('nu_isAdmin').checked;
-
-    if (!username || !password) {
-        $('nu_error').textContent = "Username and Password are required!";
-        $('nu_error').classList.remove('hidden');
-        return;
-    }
-
-    const menuAccess = {};
-    document.querySelectorAll('.nu-menu').forEach(cb => {
-        menuAccess[cb.value] = cb.checked;
-    });
-
-    const userData = {
-        username: username,
-        password: password,
-        isAdmin: isAdmin,
-        menuAccess: menuAccess,
-        updatedAt: new Date()
-    };
-
-    try {
-        if (editingUserId) {
-            // Update existing user in Firebase
-            await db.collection('users').doc(editingUserId).update(userData);
-        } else {
-            // Create new user in Firebase
-            await db.collection('users').doc(username).set(userData);
-        }
-
-        resetUserForm();
-        renderUsersList(); // UI-ஐ புதுப்பிக்க
-        alert("User saved successfully in Online Database!");
-    } catch (error) {
-        console.error("Error saving user to Firebase:", error);
-        $('nu_error').textContent = "Firebase Error: " + error.message;
-        $('nu_error').classList.remove('hidden');
-    }
-}
-
-// 🔥 FIREBASE-ல் இருந்து பயனர்களை லோட் செய்ய (Load Users from Firebase)
-function renderUsersList() {
-    db.collection('users').onSnapshot((snapshot) => {
-        let users = [];
-        snapshot.forEach((doc) => {
-            users.push({ id: doc.id, ...doc.data() });
-        });
-        
-        // உங்கள் UI-ல் பயனர்களின் பட்டியலைக் காட்டும் பழைய Logic-ஐ இங்கே அழைத்துக் கொள்ளலாம்
-        if (typeof displayUsersUI === 'function') {
-            displayUsersUI(users);
-        }
-    });
-}}
 function renderUsersList(){
   $('uc_count').textContent = USERS.length;
   $('usersListBody').innerHTML = USERS.map(u=>{
@@ -5088,34 +5050,6 @@ document.addEventListener('click', e=>{
   }
 })();
 
-</script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-
-<!-- Firebase Config Initialization -->
-<script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyDZNZP_gVBXZs1xDvKKdfVZ7SWfacvM-5A",
-    authDomain: "smv-insight.firebaseapp.com",
-    databaseURL: "https://smv-insight-default-rtdb.firebaseio.com",
-    projectId: "smv-insight",
-    storageBucket: "smv-insight.firebasestorage.app",
-    messagingSenderId: "290153757190",
-    appId: "1:290153757190:web:8ad595d9a20e001135a187",
-    measurementId: "G-F1HM5CJX0H"
-  };
-
-  if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-  }
-
-  const auth = firebase.auth();
-  const db = firebase.firestore();
-  const rtdb = firebase.database();
-
-  console.log("🔥 Firebase connected successfully to SMV Insight!");
 </script>
 </body>
 </html>
